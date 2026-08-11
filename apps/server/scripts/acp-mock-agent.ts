@@ -283,13 +283,22 @@ const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
   { modelId: "grok-mock-alt", name: "Grok Mock Alt" },
 ];
 
+const devinAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
+  { modelId: "adaptive", name: "Adaptive" },
+  { modelId: "devin-mock-alt", name: "Devin Mock Alt" },
+];
+
+const activeMockModels =
+  process.env.T3_ACP_MOCK_PROVIDER === "devin" ? devinAcpModels : grokAcpModels;
+const defaultMockModelId = activeMockModels[0]!.modelId;
+
 function modelState(): AcpSchema.SessionModelState {
-  const modelId = grokAcpModels.some((model) => model.modelId === currentModelId)
+  const modelId = activeMockModels.some((model) => model.modelId === currentModelId)
     ? currentModelId
-    : "grok-build";
+    : defaultMockModelId;
   return {
     currentModelId: modelId,
-    availableModels: grokAcpModels,
+    availableModels: activeMockModels,
   };
 }
 
@@ -382,7 +391,7 @@ const program = Effect.gen(function* () {
 
   yield* agent.handleSetSessionModel((request) =>
     Effect.gen(function* () {
-      if (!grokAcpModels.some((model) => model.modelId === request.modelId)) {
+      if (!activeMockModels.some((model) => model.modelId === request.modelId)) {
         return yield* AcpError.AcpRequestError.invalidParams(
           `Unknown mock model id: ${request.modelId}`,
           {
