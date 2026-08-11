@@ -1441,6 +1441,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                   codex: { enabled: false },
                   claudeAgent: { enabled: false },
                   cursor: { enabled: false },
+                  devin: { enabled: false },
                   grok: { enabled: false },
                   opencode: { enabled: false },
                 },
@@ -1553,6 +1554,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                   codex: { enabled: true, binaryPath: firstMissing },
                   claudeAgent: { enabled: false },
                   cursor: { enabled: false },
+                  devin: { enabled: false },
                   grok: { enabled: false },
                   opencode: { enabled: false },
                 },
@@ -1667,6 +1669,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                   codex: { enabled: false },
                   claudeAgent: { enabled: false },
                   cursor: { enabled: false },
+                  devin: { enabled: false },
                   grok: { enabled: false },
                   opencode: { enabled: false },
                 },
@@ -1733,6 +1736,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                       enabled: false,
                     },
                     cursor: {
+                      enabled: false,
+                    },
+                    devin: {
                       enabled: false,
                     },
                     grok: {
@@ -1806,6 +1812,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 "claudeAgent",
                 "codex",
                 "cursor",
+                "devin",
                 "grok",
                 "opencode",
               ]);
