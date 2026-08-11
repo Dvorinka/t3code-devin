@@ -38,6 +38,19 @@ export function ProviderIcon(props: ProviderIconProps) {
     );
   }
 
+  if (props.provider === "devin") {
+    const fill = isDarkMode ? "#F5F5F5" : "#0F0F0F";
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path fill={fill} opacity={0.18} d="M12 2L21 7V17L12 22L3 17V7L12 2Z" />
+        <Path
+          fill={fill}
+          d="M8.5 7.5H13.25C15.5921 7.5 17.5 9.40786 17.5 11.75C17.5 14.0921 15.5921 16 13.25 16H8.5V7.5ZM10.75 9.75V13.75H13.25C14.3546 13.75 15.25 12.8546 15.25 11.75C15.25 10.6454 14.3546 9.75 13.25 9.75H10.75Z"
+        />
+      </Svg>
+    );
+  }
+
   if (props.provider === "cursor") {
     return (
       <Svg width={size} height={size} viewBox="0 0 466.73 532.09" fill="none">
