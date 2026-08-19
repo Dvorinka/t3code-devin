@@ -47,13 +47,13 @@ jobs:
       - name: Ensure Electron runtime
         run: vp run --filter @t3tools/desktop ensure:electron
 
-      - name: Install ImageMagick
+      - name: Verify ImageMagick
         shell: bash
         run: |
-          if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
-              sudo apt-get update -qq
-              sudo apt-get install -y -qq imagemagick
-          fi
+          command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1 || {
+            echo "ImageMagick not found. Install it on the runner: apt-get install -y imagemagick" >&2
+            exit 1
+          }
 
       - name: Build desktop artifact
         shell: bash
