@@ -3,6 +3,7 @@
 
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
+import * as crypto from "node:crypto";
 
 import {
   createPackageWithOptions,
@@ -2816,7 +2817,39 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // On Windows the server tree ships in the server.asar sidecar instead of
   // app.asar (see stageWindowsServerSidecar), so the app stage omits it.
   if (options.platform !== "win") {
-    yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+    const stagedServerDist = path.join(stageAppDir, "apps/server/dist");
+    const sourceBinMjs = path.join(distDirs.serverDist, "bin.mjs");
+    // DEBUG: log SHA256 before copy
+    if (yield* fs.exists(sourceBinMjs)) {
+      const sourceContent = yield* fs.readFile(sourceBinMjs);
+      const sourceHash = crypto.createHash("sha256").update(sourceContent).digest("hex");
+      yield* Effect.log(
+        `[desktop-artifact] DEBUG source bin.mjs sha256=${sourceHash} path=${sourceBinMjs}`,
+      );
+      // Check for our patch marker
+      const sourceText = sourceContent.toString("utf8");
+      const hasDevinRequiresNewThread =
+        sourceText.includes("DEVIN_PRESENTATION") &&
+        sourceText
+          .slice(
+            sourceText.indexOf("DEVIN_PRESENTATION"),
+            sourceText.indexOf("DEVIN_PRESENTATION") + 200,
+          )
+          .includes("requiresNewThreadForModelChange: true");
+      yield* Effect.log(
+        `[desktop-artifact] DEBUG source DEVIN_PRESENTATION has requiresNewThreadForModelChange: ${hasDevinRequiresNewThread}`,
+      );
+    }
+    yield* fs.copy(distDirs.serverDist, stagedServerDist);
+    // DEBUG: log SHA256 after copy
+    const stagedBinMjs = path.join(stagedServerDist, "bin.mjs");
+    if (yield* fs.exists(stagedBinMjs)) {
+      const stagedContent = yield* fs.readFile(stagedBinMjs);
+      const stagedHash = crypto.createHash("sha256").update(stagedContent).digest("hex");
+      yield* Effect.log(
+        `[desktop-artifact] DEBUG staged bin.mjs sha256=${stagedHash} path=${stagedBinMjs}`,
+      );
+    }
   }
   yield* stageResourceMonitor({
     repoRoot,
@@ -2953,6 +2986,22 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     { label: "vp install --prod", verbose: options.verbose },
   );
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
+
+  // DEBUG: log SHA256 after vp install --prod
+  if (options.platform !== "win") {
+    const postInstallBinMjs = path.join(stageAppDir, "apps/server/dist/bin.mjs");
+    if (yield* fs.exists(postInstallBinMjs)) {
+      const postInstallContent = yield* fs.readFile(postInstallBinMjs);
+      const postInstallHash = crypto.createHash("sha256").update(postInstallContent).digest("hex");
+      yield* Effect.log(
+        `[desktop-artifact] DEBUG post-install bin.mjs sha256=${postInstallHash} path=${postInstallBinMjs}`,
+      );
+    } else {
+      yield* Effect.log(
+        `[desktop-artifact] DEBUG post-install bin.mjs MISSING at ${postInstallBinMjs}`,
+      );
+    }
+  }
 
   // WSL is Windows-only, so only the Windows artifact carries the server
   // sidecar (which embeds the Linux node-pty prebuild); other platforms
