@@ -100,6 +100,10 @@ function devinModelsFromSettings(
   return providerModelsFromSettings(builtInModels, customModels ?? [], EMPTY_CAPABILITIES);
 }
 
+// Convert SessionModelState.availableModels into the flat {value, name} shape
+// that groupDevinModels expects, then run the same grouping pipeline as
+// buildDevinDiscoveredModelsFromConfigOptions.  This prevents duplicate
+// entries (e.g. `glm-5-2` and `glm-5-2-high` showing as separate models).
 function buildDevinDiscoveredModelsFromSessionModelState(
   modelState: EffectAcpSchema.SessionModelState | null | undefined,
   defaultModel: string | null | undefined,
@@ -107,30 +111,20 @@ function buildDevinDiscoveredModelsFromSessionModelState(
   if (!modelState || modelState.availableModels.length === 0) {
     return [];
   }
-  const seen = new Set<string>();
-  return modelState.availableModels
-    .map((model): ServerProviderModel | undefined => {
-      const slug = resolveDevinAcpBaseModelId(model.modelId, defaultModel);
-      if (!slug || seen.has(slug)) {
-        return undefined;
-      }
-      seen.add(slug);
-      return {
-        slug,
-        name: model.name.trim() || slug,
-        isCustom: false,
-        capabilities: EMPTY_CAPABILITIES,
-      };
-    })
-    .filter((model): model is ServerProviderModel => model !== undefined);
+  const flatOptions = modelState.availableModels.map((m) => ({
+    value: m.modelId,
+    name: m.name?.trim() || m.modelId,
+  }));
+  return buildGroupedDevinModels(flatOptions, defaultModel);
 }
 
-// ── Reasoning level extraction ────────────────────────────────────────
+// ── Reasoning level + context window extraction ──────────────────────
 // Devin encodes reasoning levels as model ID suffixes (e.g. `glm-5-2-max`,
-// `claude-opus-5-high`). We group variants by base model and expose the
-// reasoning level as an option descriptor, matching how Codex exposes
-// `reasoningEffort`. This collapses 184 raw entries into ~30 base models
-// with a reasoning dropdown.
+// `claude-opus-5-high`) and context windows as `-1m`. We group variants by
+// base model and expose reasoning level + context window as option
+// descriptors, matching how Codex exposes `reasoningEffort` and Claude
+// exposes `contextWindow`. This collapses 184 raw entries into ~30 base
+// models with dropdowns.
 
 const REASONING_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
 type ReasoningLevel = (typeof REASONING_LEVELS)[number];
@@ -148,6 +142,10 @@ const REASONING_LABELS: Readonly<Record<ReasoningLevel, string>> = {
 // `-fast` / `-priority` = speed tier, `-1m` = context window, `-lightning` = variant.
 const NON_REASONING_SUFFIXES = ["fast", "priority", "1m", "lightning"] as const;
 
+// Context window option values exposed in the UI.
+const CONTEXT_WINDOW_STANDARD = "standard";
+const CONTEXT_WINDOW_1M = "1m";
+
 interface DevinModelVariant {
   readonly modelId: string;
   readonly name: string;
@@ -162,6 +160,33 @@ interface DevinModelGroup {
   readonly variants: ReadonlyArray<DevinModelVariant>;
   readonly reasoningLevels: ReadonlyArray<ReasoningLevel>;
   readonly defaultLevel: ReasoningLevel | undefined;
+  readonly hasLargeContext: boolean;
+}
+
+// Remove reasoning level indicators from a display name so the model
+// picker shows "GLM 5.2" instead of "GLM 5.2 High". The reasoning level
+// is communicated via the option descriptor, not the model name.
+function cleanBaseDisplayName(name: string): string {
+  let cleaned = name.trim();
+  // Remove trailing reasoning level words (case-insensitive).
+  for (const level of REASONING_LEVELS) {
+    const label = REASONING_LABELS[level];
+    // Match " High", " Max", " Extra High" at end of string.
+    const suffixPattern = new RegExp(`\\s+${label}$`, "i");
+    if (suffixPattern.test(cleaned)) {
+      cleaned = cleaned.replace(suffixPattern, "");
+      break;
+    }
+    // Also match raw level words like " xhigh", " none".
+    const rawPattern = new RegExp(`\\s+${level}$`, "i");
+    if (rawPattern.test(cleaned)) {
+      cleaned = cleaned.replace(rawPattern, "");
+      break;
+    }
+  }
+  // Remove "No Thinking" suffix.
+  cleaned = cleaned.replace(/\s+No\s+Thinking$/i, "");
+  return cleaned.trim() || name.trim();
 }
 
 // Strip reasoning and non-reasoning suffixes to find the base model ID.
@@ -244,8 +269,10 @@ function groupDevinModels(
     const reasoningLevels = new Set<ReasoningLevel>();
     let baseName = baseId;
     let defaultLevel: ReasoningLevel | undefined;
+    let hasLargeContext = false;
 
     for (const v of groupVariants) {
+      if (v.isLargeContext) hasLargeContext = true;
       if (v.reasoningLevel) {
         reasoningLevels.add(v.reasoningLevel);
         // The "default" variant is the one without -fast/-1m suffix.
@@ -265,19 +292,16 @@ function groupDevinModels(
       }
     }
 
-    // If the base ID itself is a variant with no reasoning suffix but
-    // the group has reasoning variants, check if the base is implicitly "high".
-    // E.g. `glm-5-2` = "GLM-5.2 High" but has no -high suffix.
-    if (!defaultLevel && reasoningLevels.size === 0) {
-      // No reasoning variants — single model, no grouping needed.
-      // Still add as a group with no reasoning levels for uniform handling.
-    }
-
     // If base name is still the raw baseId, try to find a display name.
     if (baseName === baseId) {
       const named = groupVariants.find((v) => v.modelId === baseId);
       if (named) baseName = named.name;
     }
+
+    // Clean the display name: remove reasoning level suffix so the picker
+    // shows "GLM 5.2" instead of "GLM 5.2 High". The reasoning level is
+    // communicated via the option descriptor dropdown.
+    baseName = cleanBaseDisplayName(baseName);
 
     groups.push({
       baseId,
@@ -287,6 +311,7 @@ function groupDevinModels(
         (a, b) => REASONING_LEVELS.indexOf(a) - REASONING_LEVELS.indexOf(b),
       ),
       defaultLevel,
+      hasLargeContext,
     });
   }
 
@@ -301,50 +326,104 @@ function groupDevinModels(
   return groups;
 }
 
-// Build ModelCapabilities for a model group, exposing reasoningEffort if
-// the group has multiple reasoning levels.
+// Build ModelCapabilities for a model group, exposing reasoningEffort
+// when the group has multiple reasoning levels and contextWindow when the
+// group has both standard and 1M context variants.
 function buildDevinModelCapabilities(group: DevinModelGroup): ModelCapabilities {
-  if (group.reasoningLevels.length <= 1) {
-    return EMPTY_CAPABILITIES;
-  }
+  const optionDescriptors: ProviderOptionDescriptor[] = [];
 
-  const reasoningOptions = group.reasoningLevels.map((level) => ({
-    id: level,
-    label: REASONING_LABELS[level] ?? level,
-    ...(level === group.defaultLevel ? { isDefault: true } : {}),
-  }));
-
-  const optionDescriptors: ProviderOptionDescriptor[] = [
-    {
+  if (group.reasoningLevels.length > 1) {
+    const reasoningOptions = group.reasoningLevels.map((level) => ({
+      id: level,
+      label: REASONING_LABELS[level] ?? level,
+      ...(level === group.defaultLevel ? { isDefault: true } : {}),
+    }));
+    optionDescriptors.push({
       id: "reasoningEffort",
       label: "Reasoning",
       type: "select" as const,
       options: reasoningOptions,
       ...(group.defaultLevel ? { currentValue: group.defaultLevel } : {}),
-    },
-  ];
+    });
+  }
+
+  if (group.hasLargeContext) {
+    optionDescriptors.push({
+      id: "contextWindow",
+      label: "Context Window",
+      type: "select" as const,
+      options: [
+        { id: CONTEXT_WINDOW_STANDARD, label: "Standard", isDefault: true },
+        { id: CONTEXT_WINDOW_1M, label: "1M" },
+      ],
+      currentValue: CONTEXT_WINDOW_STANDARD,
+    });
+  }
+
+  if (optionDescriptors.length === 0) {
+    return EMPTY_CAPABILITIES;
+  }
 
   return createModelCapabilities({ optionDescriptors });
 }
 
-// Find the full model ID for a base model + reasoning level.
+// Find the full model ID for a base model + reasoning level + context window.
 // Falls back to the base ID itself if no variant matches.
 export function resolveDevinModelId(
   baseModelId: string,
   reasoningEffort: string | undefined,
+  contextWindow: string | undefined,
   groups: ReadonlyArray<DevinModelGroup>,
 ): string {
-  if (!reasoningEffort) return baseModelId;
   const group = groups.find((g) => g.baseId === baseModelId);
-  if (!group) return baseModelId;
-  // Find a variant with the requested reasoning level, preferring non-fast.
-  const variant = group.variants.find(
-    (v) => v.reasoningLevel === reasoningEffort && !v.isFast && !v.isLargeContext,
-  );
-  if (variant) return variant.modelId;
-  // Fallback: any variant with the reasoning level.
-  const anyVariant = group.variants.find((v) => v.reasoningLevel === reasoningEffort);
-  return anyVariant?.modelId ?? baseModelId;
+  if (!group) {
+    // No group — apply suffixes manually.
+    let modelId = baseModelId;
+    if (reasoningEffort?.trim()) modelId = `${modelId}-${reasoningEffort.trim()}`;
+    if (contextWindow === CONTEXT_WINDOW_1M) modelId = `${modelId}-1m`;
+    return modelId;
+  }
+
+  const wantLargeContext = contextWindow === CONTEXT_WINDOW_1M;
+  const effort = reasoningEffort?.trim();
+
+  // If no reasoning effort specified, use the group's default level.
+  const effectiveEffort = effort || group.defaultLevel;
+
+  if (effectiveEffort) {
+    // Find a variant matching reasoning level + context window, preferring non-fast.
+    const variant = group.variants.find(
+      (v) =>
+        v.reasoningLevel === effectiveEffort && v.isLargeContext === wantLargeContext && !v.isFast,
+    );
+    if (variant) return variant.modelId;
+    // Fallback: any variant with the reasoning level + context window.
+    const anyVariant = group.variants.find(
+      (v) => v.reasoningLevel === effectiveEffort && v.isLargeContext === wantLargeContext,
+    );
+    if (anyVariant) return anyVariant.modelId;
+    // Fallback: just the reasoning level, ignore context window.
+    const effortOnly = group.variants.find(
+      (v) => v.reasoningLevel === effectiveEffort && !v.isFast,
+    );
+    if (effortOnly) {
+      return wantLargeContext && !effortOnly.isLargeContext
+        ? `${effortOnly.modelId}-1m`
+        : effortOnly.modelId;
+    }
+  }
+
+  // No reasoning match — try context window only.
+  if (wantLargeContext) {
+    const ctxVariant = group.variants.find((v) => v.isLargeContext && !v.isFast);
+    if (ctxVariant) return ctxVariant.modelId;
+    const base = group.variants.find((v) => v.modelId === baseId) ?? group.variants[0];
+    return base ? `${base.modelId}-1m` : `${baseModelId}-1m`;
+  }
+
+  // Default: base model without context window suffix.
+  const baseVariant = group.variants.find((v) => v.modelId === baseId && !v.isLargeContext);
+  return baseVariant?.modelId ?? baseModelId;
 }
 
 // Module-level cache of model groups, populated during model discovery.
@@ -352,26 +431,75 @@ export function resolveDevinModelId(
 // to the actual Devin model ID without needing to pass groups through layers.
 let cachedModelGroups: ReadonlyArray<DevinModelGroup> = [];
 
-// Resolve a base model ID + reasoning effort into the actual Devin model ID.
-// Uses the cached model groups from the last discovery cycle.
-// Falls back to appending the suffix if no group matches (legacy behavior).
+// Resolve a base model ID + reasoning effort + context window into the
+// actual Devin model ID. Uses cached model groups from the last discovery.
+// Falls back to appending suffixes if no group matches (legacy behavior).
 export function resolveDevinModelIdForAdapter(
   baseModelId: string,
   reasoningEffort: string | undefined,
+  contextWindow: string | undefined,
 ): string {
-  if (!reasoningEffort?.trim()) return baseModelId;
   if (cachedModelGroups.length === 0) {
     // No groups cached — fall back to simple suffix append.
-    return `${baseModelId}-${reasoningEffort.trim()}`;
+    let modelId = baseModelId;
+    if (reasoningEffort?.trim()) modelId = `${modelId}-${reasoningEffort.trim()}`;
+    if (contextWindow === CONTEXT_WINDOW_1M) modelId = `${modelId}-1m`;
+    return modelId;
   }
-  return resolveDevinModelId(baseModelId, reasoningEffort.trim(), cachedModelGroups);
+  return resolveDevinModelId(baseModelId, reasoningEffort, contextWindow, cachedModelGroups);
+}
+
+// Shared function that takes flat (value, name) model options, groups them
+// by base model, caches the groups for adapter model ID resolution, and
+// returns ServerProviderModel[] with capabilities. Used by both the
+// SessionModelState path and the configOptions path to prevent duplicates.
+function buildGroupedDevinModels(
+  flatOptions: ReadonlyArray<{ value: string; name: string }>,
+  defaultModel: string | null | undefined,
+): ReadonlyArray<ServerProviderModel> {
+  const groups = groupDevinModels(flatOptions);
+  // Cache groups for the adapter's model ID resolution.
+  cachedModelGroups = groups;
+  const seen = new Set<string>();
+  const models: ServerProviderModel[] = [];
+
+  for (const group of groups) {
+    const slug = resolveDevinAcpBaseModelId(group.baseId, defaultModel);
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+
+    // If the group has reasoning variants or context window variants,
+    // use the base ID as the slug and expose options via capabilities.
+    // Otherwise, use the full model ID for single-variant groups.
+    if (group.reasoningLevels.length > 1 || group.hasLargeContext) {
+      models.push({
+        slug,
+        name: group.baseName,
+        isCustom: false,
+        capabilities: buildDevinModelCapabilities(group),
+      });
+    } else {
+      // Single variant or no reasoning — use the original model ID.
+      const variant = group.variants[0];
+      const fullSlug = resolveDevinAcpBaseModelId(variant.modelId, defaultModel);
+      if (fullSlug && !seen.has(fullSlug)) {
+        seen.add(fullSlug);
+        models.push({
+          slug: fullSlug,
+          name: cleanBaseDisplayName(variant.name),
+          isCustom: false,
+          capabilities: EMPTY_CAPABILITIES,
+        });
+      }
+    }
+  }
+
+  return models;
 }
 
 // Devin CLI does not populate SessionModelState.availableModels. Instead it
 // advertises models as a "select" config option with category "model". Extract
 // them from there so the UI shows the full model list.
-// Models are grouped by base name with reasoning levels exposed as option
-// descriptors (matching Codex's reasoningEffort pattern).
 function buildDevinDiscoveredModelsFromConfigOptions(
   configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | null | undefined,
   defaultModel: string | null | undefined,
@@ -394,44 +522,7 @@ function buildDevinDiscoveredModelsFromConfigOptions(
         )
       : [];
 
-  const groups = groupDevinModels(flatOptions);
-  // Cache groups for the adapter's model ID resolution.
-  cachedModelGroups = groups;
-  const seen = new Set<string>();
-  const models: ServerProviderModel[] = [];
-
-  for (const group of groups) {
-    const slug = resolveDevinAcpBaseModelId(group.baseId, defaultModel);
-    if (!slug || seen.has(slug)) continue;
-    seen.add(slug);
-
-    // If the group has reasoning variants, use the base ID as the slug
-    // and expose reasoning levels via capabilities. Otherwise, if there's
-    // only one variant, use the full model ID.
-    if (group.reasoningLevels.length > 1) {
-      models.push({
-        slug,
-        name: group.baseName,
-        isCustom: false,
-        capabilities: buildDevinModelCapabilities(group),
-      });
-    } else {
-      // Single variant or no reasoning — use the original model ID.
-      const variant = group.variants[0];
-      const fullSlug = resolveDevinAcpBaseModelId(variant.modelId, defaultModel);
-      if (fullSlug && !seen.has(fullSlug)) {
-        seen.add(fullSlug);
-        models.push({
-          slug: fullSlug,
-          name: variant.name,
-          isCustom: false,
-          capabilities: EMPTY_CAPABILITIES,
-        });
-      }
-    }
-  }
-
-  return models;
+  return buildGroupedDevinModels(flatOptions, defaultModel);
 }
 
 const discoverDevinModelsViaAcp = (

@@ -681,6 +681,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
             ? resolveDevinModelIdForAdapter(
                 resolveDevinAcpBaseModelId(devinModelSelection.model, devinSettings.defaultModel),
                 getModelSelectionStringOptionValue(devinModelSelection, "reasoningEffort"),
+                getModelSelectionStringOptionValue(devinModelSelection, "contextWindow"),
               )
             : undefined;
           const boundModelId = yield* applyDevinAcpModelSelection({
@@ -913,6 +914,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                       devinSettings.defaultModel,
                     ),
                     getModelSelectionStringOptionValue(turnModelSelection, "reasoningEffort"),
+                    getModelSelectionStringOptionValue(turnModelSelection, "contextWindow"),
                   )
                 : undefined;
               const currentModelId = yield* applyDevinAcpModelSelection({
