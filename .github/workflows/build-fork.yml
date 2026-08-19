@@ -70,8 +70,8 @@ jobs:
         with:
           name: linux-appimage
           path: |
-            apps/desktop/dist/*.AppImage
-            apps/desktop/dist/latest-linux.yml
+            release/*.AppImage
+            release/*.yml
           if-no-files-found: error
 
   release:
@@ -112,4 +112,4 @@ jobs:
           prerelease: true
           files: |
             release-assets/*.AppImage
-            release-assets/*.yml
+            release-assets/latest-linux*.yml
