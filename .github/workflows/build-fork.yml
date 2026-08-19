@@ -1,0 +1,115 @@
+name: Build (Fork)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label (e.g. 0.0.34-devin.1)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*-*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: self-hosted
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/desktop...
+              - --filter=t3...
+              - --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Ensure Electron runtime
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Install ImageMagick
+        shell: bash
+        run: |
+          if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq imagemagick
+          fi
+
+      - name: Build desktop artifact
+        shell: bash
+        run: |
+          node scripts/build-desktop-artifact.ts \
+            --platform linux \
+            --target AppImage \
+            --arch x64 \
+            --build-version "${{ inputs.version || '0.0.0-fork' }}" \
+            --verbose
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage
+          path: |
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/latest-linux.yml
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: linux-appimage
+          path: release-assets
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "name=T3 Code ${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "name=T3 Code ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.name }}
+          generate_release_notes: true
+          prerelease: true
+          files: |
+            release-assets/*.AppImage
+            release-assets/*.yml
