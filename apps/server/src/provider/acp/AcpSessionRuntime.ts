@@ -69,6 +69,7 @@ export interface AcpSessionRuntimeOptions {
     readonly version: string;
   };
   readonly authMethodId: string;
+  readonly authMeta?: Readonly<Record<string, unknown>>;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -551,9 +552,10 @@ export const make = (
       );
 
       if (authMethodAvailable) {
-        const authenticatePayload = {
+        const authenticatePayload: EffectAcpSchema.AuthenticateRequest = {
           methodId: options.authMethodId,
-        } satisfies EffectAcpSchema.AuthenticateRequest;
+          ...(options.authMeta ? { _meta: { ...options.authMeta } } : {}),
+        };
 
         yield* runLoggedRequest(
           "authenticate",
@@ -902,6 +904,11 @@ const handleSessionUpdate = ({
         continue;
       }
       if (event._tag === "ContentDelta") {
+        // Reasoning text doesn't belong to the assistant message segment.
+        if (event.contentType === "reasoning_text") {
+          yield* Queue.offer(queue, event);
+          continue;
+        }
         if (event.text.trim().length === 0) {
           const assistantSegmentState = yield* Ref.get(assistantSegmentRef);
           if (!assistantSegmentState.activeItemId) {

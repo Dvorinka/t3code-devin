@@ -221,6 +221,7 @@ export function makeAcpContentDeltaEvent(input: {
   readonly itemId?: string;
   readonly text: string;
   readonly rawPayload: unknown;
+  readonly contentType?: "assistant_text" | "reasoning_text";
 }): ProviderRuntimeEvent {
   return {
     type: "content.delta",
@@ -230,7 +231,7 @@ export function makeAcpContentDeltaEvent(input: {
     turnId: input.turnId,
     ...(input.itemId ? { itemId: RuntimeItemId.make(input.itemId) } : {}),
     payload: {
-      streamKind: "assistant_text",
+      streamKind: input.contentType ?? "assistant_text",
       delta: input.text,
     },
     raw: {

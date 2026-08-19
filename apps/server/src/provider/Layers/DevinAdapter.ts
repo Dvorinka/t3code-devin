@@ -31,6 +31,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
+import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -59,6 +60,7 @@ import {
   makeDevinAcpRuntime,
   resolveDevinAcpBaseModelId,
 } from "../acp/DevinAcpSupport.ts";
+import { resolveDevinModelIdForAdapter } from "./DevinProvider.ts";
 import { type DevinAdapterShape } from "../Services/DevinAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -676,7 +678,10 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           );
 
           const requestedStartModelId = devinModelSelection?.model
-            ? resolveDevinAcpBaseModelId(devinModelSelection.model, devinSettings.defaultModel)
+            ? resolveDevinModelIdForAdapter(
+                resolveDevinAcpBaseModelId(devinModelSelection.model, devinSettings.defaultModel),
+                getModelSelectionStringOptionValue(devinModelSelection, "reasoningEffort"),
+              )
             : undefined;
           const boundModelId = yield* applyDevinAcpModelSelection({
             runtime: acp,
@@ -808,8 +813,28 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                         ...(event.itemId ? { itemId: event.itemId } : {}),
                         text: event.text,
                         rawPayload: event.rawPayload,
+                        ...(event.contentType ? { contentType: event.contentType } : {}),
                       }),
                     );
+                    return;
+                  case "UsageUpdated":
+                    // Token usage update — emit as a thread token-usage event.
+                    yield* offerRuntimeEvent({
+                      type: "thread.token-usage.updated",
+                      ...stamp,
+                      provider: PROVIDER,
+                      threadId: ctx.threadId,
+                      payload: {
+                        modelContextWindow: event.usage.contextWindowSize,
+                        tokensUsed: event.usage.tokensUsed,
+                        ...(event.usage.cost != null ? { cost: event.usage.cost } : {}),
+                      },
+                      raw: {
+                        source: "acp.jsonrpc",
+                        method: "session/update",
+                        payload: event.rawPayload,
+                      },
+                    });
                     return;
                 }
               }),
@@ -882,7 +907,13 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                   ? input.modelSelection
                   : undefined;
               const requestedTurnModelId = turnModelSelection?.model
-                ? resolveDevinAcpBaseModelId(turnModelSelection.model, devinSettings.defaultModel)
+                ? resolveDevinModelIdForAdapter(
+                    resolveDevinAcpBaseModelId(
+                      turnModelSelection.model,
+                      devinSettings.defaultModel,
+                    ),
+                    getModelSelectionStringOptionValue(turnModelSelection, "reasoningEffort"),
+                  )
                 : undefined;
               const currentModelId = yield* applyDevinAcpModelSelection({
                 runtime: ctx.acp,
