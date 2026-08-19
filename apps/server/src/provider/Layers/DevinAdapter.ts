@@ -820,15 +820,19 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                     return;
                   case "UsageUpdated":
                     // Token usage update — emit as a thread token-usage event.
+                    // Map ACP field names to ThreadTokenUsageSnapshot schema fields.
                     yield* offerRuntimeEvent({
                       type: "thread.token-usage.updated",
                       ...stamp,
                       provider: PROVIDER,
                       threadId: ctx.threadId,
                       payload: {
-                        modelContextWindow: event.usage.contextWindowSize,
-                        tokensUsed: event.usage.tokensUsed,
-                        ...(event.usage.cost != null ? { cost: event.usage.cost } : {}),
+                        usage: {
+                          usedTokens: event.usage.tokensUsed,
+                          ...(event.usage.contextWindowSize != null
+                            ? { maxTokens: event.usage.contextWindowSize }
+                            : {}),
+                        },
                       },
                       raw: {
                         source: "acp.jsonrpc",

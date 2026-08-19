@@ -29,6 +29,8 @@ import {
   makeDevinAcpRuntime,
   resolveDevinAcpBaseModelId,
 } from "../provider/acp/DevinAcpSupport.ts";
+import { resolveDevinModelIdForAdapter } from "../provider/Layers/DevinProvider.ts";
+import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 const DEVIN_TIMEOUT_MS = 180_000;
 
@@ -59,9 +61,10 @@ export const makeDevinTextGeneration = Effect.fn("makeDevinTextGeneration")(func
     modelSelection: ModelSelection;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
-      const resolvedModel = resolveDevinAcpBaseModelId(
-        modelSelection.model,
-        devinSettings.defaultModel,
+      const resolvedModel = resolveDevinModelIdForAdapter(
+        resolveDevinAcpBaseModelId(modelSelection.model, devinSettings.defaultModel),
+        getModelSelectionStringOptionValue(modelSelection, "reasoningEffort"),
+        getModelSelectionStringOptionValue(modelSelection, "contextWindow"),
       );
       const outputRef = yield* Ref.make("");
       const runtime = yield* makeDevinAcpRuntime({
