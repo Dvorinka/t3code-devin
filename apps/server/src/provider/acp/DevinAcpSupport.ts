@@ -86,7 +86,7 @@ export function currentDevinModelIdFromSessionSetup(
 }
 
 export function applyDevinAcpModelSelection<E>(input: {
-  readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setSessionModel">;
+  readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setModel">;
   readonly currentModelId: string | undefined;
   readonly requestedModelId: string | undefined;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
@@ -97,6 +97,6 @@ export function applyDevinAcpModelSelection<E>(input: {
     return Effect.succeed(input.currentModelId);
   }
   return input.runtime
-    .setSessionModel(input.requestedModelId)
+    .setModel(input.requestedModelId)
     .pipe(Effect.mapError(input.mapError), Effect.as(input.requestedModelId));
 }
