@@ -30,7 +30,7 @@ export function buildDevinAcpSpawnInput(
   environment?: NodeJS.ProcessEnv,
 ): AcpSessionRuntime.AcpSpawnInput {
   const defaultModel = devinSettings?.defaultModel?.trim();
-  const args = defaultModel ? ["acp", "--model", defaultModel] : ["acp"];
+  const args = defaultModel ? ["--model", defaultModel, "acp"] : ["acp"];
   return {
     command: devinSettings?.binaryPath || "devin",
     args,
@@ -86,7 +86,7 @@ export function currentDevinModelIdFromSessionSetup(
 }
 
 export function applyDevinAcpModelSelection<E>(input: {
-  readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setSessionModel">;
+  readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setModel">;
   readonly currentModelId: string | undefined;
   readonly requestedModelId: string | undefined;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
@@ -97,6 +97,6 @@ export function applyDevinAcpModelSelection<E>(input: {
     return Effect.succeed(input.currentModelId);
   }
   return input.runtime
-    .setSessionModel(input.requestedModelId)
+    .setModel(input.requestedModelId)
     .pipe(Effect.mapError(input.mapError), Effect.as(input.requestedModelId));
 }

@@ -541,15 +541,26 @@ export const make = (
         acp.agent.initialize(initializePayload),
       );
 
-      const authenticatePayload = {
-        methodId: options.authMethodId,
-      } satisfies EffectAcpSchema.AuthenticateRequest;
-
-      yield* runLoggedRequest(
-        "authenticate",
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
+      // Only call authenticate if the configured method is advertised by the
+      // agent. Some agents (e.g. Devin) use stored credentials and do not
+      // advertise the method the client was configured with; calling
+      // authenticate with an unadvertised method causes an ACP error.
+      const advertisedAuthMethods = initializeResult.authMethods ?? [];
+      const authMethodAvailable = advertisedAuthMethods.some(
+        (method) => method.id === options.authMethodId,
       );
+
+      if (authMethodAvailable) {
+        const authenticatePayload = {
+          methodId: options.authMethodId,
+        } satisfies EffectAcpSchema.AuthenticateRequest;
+
+        yield* runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        );
+      }
 
       let sessionId: string;
       let sessionSetupResult:
