@@ -5,6 +5,8 @@ import { DevinSettings, ProviderDriverKind } from "@t3tools/contracts";
 
 import { DevinDriver } from "./DevinDriver.ts";
 
+const decodedDefaultConfig = Schema.decodeSync(DevinSettings)({});
+
 describe("DevinDriver", () => {
   it("exposes the devin driver kind", () => {
     expect(DevinDriver.driverKind).toEqual(ProviderDriverKind.make("devin"));
@@ -18,7 +20,7 @@ describe("DevinDriver", () => {
   });
 
   it("decodes a default config from an empty object", () => {
-    const config = Schema.decodeSync(DevinSettings)({});
+    const config = decodedDefaultConfig;
     expect(DevinDriver.defaultConfig()).toEqual(config);
     expect(config.enabled).toBe(true);
     expect(config.binaryPath).toBe("devin");
