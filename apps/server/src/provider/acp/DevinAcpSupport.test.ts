@@ -45,7 +45,7 @@ describe("buildDevinAcpSpawnInput", () => {
       "/tmp/project",
     );
 
-    expect(spawn.args).toEqual(["acp", "--model", "adaptive"]);
+    expect(spawn.args).toEqual(["--model", "adaptive", "acp"]);
   });
 
   it("falls back to the devin binary name when binaryPath is empty", () => {

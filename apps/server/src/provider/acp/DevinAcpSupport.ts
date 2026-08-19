@@ -30,7 +30,7 @@ export function buildDevinAcpSpawnInput(
   environment?: NodeJS.ProcessEnv,
 ): AcpSessionRuntime.AcpSpawnInput {
   const defaultModel = devinSettings?.defaultModel?.trim();
-  const args = defaultModel ? ["acp", "--model", defaultModel] : ["acp"];
+  const args = defaultModel ? ["--model", defaultModel, "acp"] : ["acp"];
   return {
     command: devinSettings?.binaryPath || "devin",
     args,
