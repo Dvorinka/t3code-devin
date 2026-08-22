@@ -15,6 +15,56 @@ permissions:
   contents: write
 
 jobs:
+  # node-pty publishes no Linux prebuilt and the WSL backend runs under the
+  # distro's own (Linux) Node, which can't load the Windows/Electron binary. We
+  # build the Linux pty.node here, on Linux, and hand it to the Windows
+  # packaging job so the Windows artifact ships a ready WSL backend binary with
+  # no first-launch compile. node-pty is N-API, so one binary works across all
+  # WSL Node versions.
+  build-wsl-node-pty:
+    name: Build WSL node-pty (linux-x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=t3...
+
+      - name: Build node-pty linux-x64 prebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Resolve node-pty from apps/server (where it's a dependency) and
+          # build its native binary from source for Linux. node-addon-api
+          # resolves from node-pty's own dependency tree, so node-gyp has
+          # everything it needs.
+          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
+          pty_dir="$(dirname "$pty_pkg")"
+          ( cd "$pty_dir" && npx --yes node-gyp rebuild )
+          mkdir -p wsl-prebuild
+          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
+          file wsl-prebuild/pty.node
+
+      - name: Upload node-pty linux-x64 prebuild
+        uses: actions/upload-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild/pty.node
+          if-no-files-found: error
+
   build-linux:
     name: Build Linux AppImage
     runs-on: self-hosted
@@ -74,9 +124,86 @@ jobs:
             release/*.yml
           if-no-files-found: error
 
+  build-windows:
+    name: Build Windows x64
+    needs: [build-wsl-node-pty]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/desktop...
+              - --filter=t3...
+              - --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Ensure Electron runtime
+        shell: bash
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Download WSL node-pty prebuild
+        uses: actions/download-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild
+
+      - name: Install Spectre-mitigated MSVC libs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) {
+            $code = if ($null -ne $proc) { $proc.ExitCode } else { 1 }
+            Write-Error "Visual Studio Installer failed with exit code $code"
+            exit $code
+          }
+
+      - name: Build desktop artifact
+        shell: bash
+        run: |
+          node scripts/build-desktop-artifact.ts \
+            --platform win \
+            --target nsis \
+            --arch x64 \
+            --wsl-prebuild "$GITHUB_WORKSPACE/wsl-prebuild/pty.node" \
+            --build-version "${{ inputs.version || '0.0.0-fork' }}" \
+            --verbose
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-nsis
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/*.yml
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
-    needs: [build-linux]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -85,10 +212,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Download artifacts
+      - name: Download Linux artifacts
         uses: actions/download-artifact@v7
         with:
           name: linux-appimage
+          path: release-assets
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: windows-nsis
           path: release-assets
 
       - name: Resolve version
@@ -112,4 +245,6 @@ jobs:
           prerelease: true
           files: |
             release-assets/*.AppImage
-            release-assets/latest-linux*.yml
+            release-assets/*.exe
+            release-assets/*.blockmap
+            release-assets/*.yml
