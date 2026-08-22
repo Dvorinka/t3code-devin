@@ -604,7 +604,7 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
         usage: {
           contextWindowSize: upd.size,
           tokensUsed: upd.used,
-          ...(upd.cost != null ? { cost: upd.cost } : {}),
+          ...(upd.cost != null ? { cost: upd.cost.amount } : {}),
         },
         rawPayload: params,
       });

@@ -417,12 +417,12 @@ export function resolveDevinModelId(
   if (wantLargeContext) {
     const ctxVariant = group.variants.find((v) => v.isLargeContext && !v.isFast);
     if (ctxVariant) return ctxVariant.modelId;
-    const base = group.variants.find((v) => v.modelId === baseId) ?? group.variants[0];
+    const base = group.variants.find((v) => v.modelId === group.baseId) ?? group.variants[0];
     return base ? `${base.modelId}-1m` : `${baseModelId}-1m`;
   }
 
   // Default: base model without context window suffix.
-  const baseVariant = group.variants.find((v) => v.modelId === baseId && !v.isLargeContext);
+  const baseVariant = group.variants.find((v) => v.modelId === group.baseId && !v.isLargeContext);
   return baseVariant?.modelId ?? baseModelId;
 }
 
@@ -481,6 +481,7 @@ function buildGroupedDevinModels(
     } else {
       // Single variant or no reasoning — use the original model ID.
       const variant = group.variants[0];
+      if (!variant) continue;
       const fullSlug = resolveDevinAcpBaseModelId(variant.modelId, defaultModel);
       if (fullSlug && !seen.has(fullSlug)) {
         seen.add(fullSlug);
@@ -517,7 +518,10 @@ function buildDevinDiscoveredModelsFromConfigOptions(
           "value" in entry
             ? [{ value: entry.value, name: entry.name }]
             : "options" in entry && Array.isArray(entry.options)
-              ? entry.options.map((o) => ({ value: o.value, name: o.name }))
+              ? entry.options.map((o: EffectAcpSchema.SessionConfigSelectOption) => ({
+                  value: o.value,
+                  name: o.name,
+                }))
               : [],
         )
       : [];
