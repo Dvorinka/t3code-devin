@@ -10,7 +10,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as NodeFs from "node:fs";
+import * as NodeFS from "node:fs";
 
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 
@@ -56,7 +56,7 @@ function readDevinApiKey(environment?: NodeJS.ProcessEnv): string | undefined {
   const home = environment?.HOME || NodeOS.homedir();
   const credPath = NodePath.join(home, ".local", "share", "devin", "credentials.toml");
   try {
-    const content = NodeFs.readFileSync(credPath, "utf-8");
+    const content = NodeFS.readFileSync(credPath, "utf-8");
     // TOML values may be quoted or unquoted; strip quotes and whitespace.
     for (const key of ["devin_api_key", "windsurf_api_key", "api_key"]) {
       const match = content.match(new RegExp(`^${key}\\s*=\\s*["']?([^"'\\n]+)["']?`, "m"));

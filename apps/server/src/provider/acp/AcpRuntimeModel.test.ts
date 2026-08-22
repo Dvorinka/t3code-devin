@@ -322,6 +322,7 @@ describe("AcpRuntimeModel", () => {
       {
         _tag: "ContentDelta",
         text: "hello from acp",
+        contentType: "assistant_text",
         rawPayload: {
           sessionId: "session-1",
           update: {
